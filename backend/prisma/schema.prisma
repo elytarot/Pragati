@@ -1,0 +1,397 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── USERS ──────────────────────────────────────────────────────────
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(FIELD_WORKER)
+  districtId   String?
+  blockId      String?
+  phone        String?
+  status       UserStatus @default(ACTIVE)
+  lastLogin    DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  district      Location?      @relation("UserDistrict", fields: [districtId], references: [id])
+  block         Location?      @relation("UserBlock", fields: [blockId], references: [id])
+  children      Child[]        @relation("AssignedWorker")
+  interventions Intervention[]
+  assessments   Assessment[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+}
+
+enum Role {
+  SUPER_ADMIN
+  DISTRICT_COORDINATOR
+  BLOCK_COORDINATOR
+  FIELD_WORKER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// ── LOCATIONS ──────────────────────────────────────────────────────
+model Location {
+  id       String       @id @default(uuid())
+  name     String
+  type     LocationType
+  parentId String?
+  state    String       @default("Rajasthan")
+  isActive Boolean      @default(true)
+  createdAt DateTime    @default(now())
+
+  parent          Location?  @relation("LocationTree", fields: [parentId], references: [id])
+  children        Location[] @relation("LocationTree")
+  childrenInDist  Child[]    @relation("ChildDistrict")
+  childrenInBlock Child[]    @relation("ChildBlock")
+  usersInDist     User[]     @relation("UserDistrict")
+  usersInBlock    User[]     @relation("UserBlock")
+}
+
+enum LocationType {
+  DISTRICT
+  BLOCK
+}
+
+// ── CHILDREN ───────────────────────────────────────────────────────
+model Child {
+  id               String      @id @default(uuid())
+  bbId             String      @unique
+  name             String
+  dob              DateTime
+  gender           Gender
+  aadharNo         String?
+  certNo           String?
+  certAuthority    String?
+  category         String?
+  bplStatus        String?
+  districtId       String
+  blockId          String
+  village          String
+  gramPanchayat    String?
+  habitation       String?
+  pincode          String?
+  schoolName       String
+  schoolType       String?
+  currentClass     String
+  udiseCode        String?
+  primaryDiagnosis String?
+  comorbidity      String?
+  medications      String?
+  status           ChildStatus @default(ACTIVE)
+  assignedWorkerId String?
+  photoUrl         String?
+  customData       Json?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  deletedAt        DateTime?
+
+  district      Location         @relation("ChildDistrict", fields: [districtId], references: [id])
+  block         Location         @relation("ChildBlock", fields: [blockId], references: [id])
+  worker        User?            @relation("AssignedWorker", fields: [assignedWorkerId], references: [id])
+  disabilities  Disability[]
+  iepPlans      IEPPlan[]
+  assessments   Assessment[]
+  interventions Intervention[]
+  devices       AssistiveDevice[]
+  documents     Document[]
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  TRANSGENDER
+}
+
+enum ChildStatus {
+  ACTIVE
+  ASSESSMENT_PENDING
+  IEP_PENDING
+  TRANSFERRED
+  COMPLETED
+  DROPOUT
+}
+
+// ── DISABILITIES ───────────────────────────────────────────────────
+model Disability {
+  id          String  @id @default(uuid())
+  childId     String
+  type        String
+  severity    String?
+  isPrimary   Boolean @default(false)
+  diagnosis   String?
+  comorbidity String?
+  certNo      String?
+
+  child Child @relation(fields: [childId], references: [id])
+}
+
+// ── IEP ────────────────────────────────────────────────────────────
+model IEPPlan {
+  id                String    @id @default(uuid())
+  childId           String
+  academicYear      String
+  plopAcademic      String?
+  plopCommunication String?
+  plopMobility      String?
+  plopAdl           String?
+  plopSocial        String?
+  plopVocational    String?
+  flnOral           String?
+  flnReading        String?
+  flnWriting        String?
+  flnNumeracy       String?
+  stemScience       String?
+  stemTech          String?
+  stemEngineering   String?
+  stemMath          String?
+  reviewCycle       String    @default("Quarterly")
+  parentConsent     Boolean   @default(false)
+  consentDate       DateTime?
+  coordinatorId     String?
+  status            IEPStatus @default(DRAFT)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  child    Child        @relation(fields: [childId], references: [id])
+  goals    IEPGoal[]
+  services IEPService[]
+}
+
+enum IEPStatus {
+  DRAFT
+  ACTIVE
+  REVIEW
+  COMPLETED
+}
+
+model IEPGoal {
+  id             String     @id @default(uuid())
+  iepId          String
+  domain         String
+  goalStatement  String
+  baselineDesc   String?
+  targetDesc     String?
+  priority       String     @default("Medium")
+  status         GoalStatus @default(NOT_STARTED)
+  achievementPct Int        @default(0)
+  aiGenerated    Boolean    @default(false)
+  aiProvider     String?
+  aiDraft        String?
+  progressNotes  Json?
+  measureMethod  String?
+  shortTermObjs  Json?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  iep IEPPlan @relation(fields: [iepId], references: [id], onDelete: Cascade)
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+  MODIFIED
+  DISCONTINUED
+}
+
+model IEPService {
+  id          String @id @default(uuid())
+  iepId       String
+  serviceType String
+  frequency   String?
+  duration    String?
+  provider    String?
+  notes       String?
+
+  iep IEPPlan @relation(fields: [iepId], references: [id], onDelete: Cascade)
+}
+
+// ── ASSESSMENTS ────────────────────────────────────────────────────
+model Assessment {
+  id             String         @id @default(uuid())
+  childId        String
+  type           AssessmentType
+  domain         String
+  score          Int
+  level          String?
+  notes          String?
+  assessmentTool String?
+  language       String?
+  environment    String?
+  date           DateTime
+  assessorId     String
+  createdAt      DateTime       @default(now())
+
+  child    Child @relation(fields: [childId], references: [id])
+  assessor User  @relation(fields: [assessorId], references: [id])
+}
+
+enum AssessmentType {
+  BASELINE
+  ENDLINE
+  MID_YEAR
+}
+
+// ── INTERVENTIONS ──────────────────────────────────────────────────
+model Intervention {
+  id             String   @id @default(uuid())
+  childId        String
+  type           String
+  date           DateTime
+  durationMin    Int
+  topic          String
+  iepGoalLinked  String?
+  activity       String?
+  materialsUsed  String?
+  outcome        String?
+  modeOfDelivery String?
+  languageUsed   String?
+  parentPresent  String?
+  staffId        String
+  notes          String?
+  nextSteps      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  child Child @relation(fields: [childId], references: [id])
+  staff User  @relation(fields: [staffId], references: [id])
+}
+
+// ── ASSISTIVE DEVICES ──────────────────────────────────────────────
+model AssistiveDevice {
+  id               String    @id @default(uuid())
+  childId          String
+  disabilityType   String
+  deviceName       String
+  provider         String
+  dateGiven        DateTime
+  serialNo         String?
+  condition        String?
+  warrantyExpiry   DateTime?
+  trainingGiven    Boolean   @default(false)
+  followUpDate     DateTime?
+  governmentScheme String?
+  identCamp        String?
+  repairHistory    Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  child Child @relation(fields: [childId], references: [id])
+}
+
+// ── DOCUMENTS ──────────────────────────────────────────────────────
+model Document {
+  id         String   @id @default(uuid())
+  childId    String
+  type       String
+  name       String
+  url        String
+  size       Int?
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  child Child @relation(fields: [childId], references: [id])
+}
+
+// ── NOTIFICATIONS ──────────────────────────────────────────────────
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  message     String
+  type        String
+  entityType  String?
+  entityId    String?
+  isRead      Boolean  @default(false)
+  smsSent     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ── AUDIT LOG ──────────────────────────────────────────────────────
+model AuditLog {
+  id         BigInt      @id @default(autoincrement())
+  userId     String
+  action     AuditAction
+  entityType String
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  timestamp  DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([timestamp])
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  AI_GENERATE
+  FILE_UPLOAD
+}
+
+// ── DYNAMIC FORM FIELDS ────────────────────────────────────────────
+model FormField {
+  id           String   @id @default(uuid())
+  module       String
+  section      String
+  fieldKey     String
+  label        String
+  labelHindi   String?
+  type         String
+  options      Json?
+  isRequired   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  minRole      String?
+  helpText     String?
+  conditions   Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([module, section, fieldKey])
+}
+
+// ── REPORT JOBS ────────────────────────────────────────────────────
+model ReportJob {
+  id          String   @id @default(uuid())
+  requestedBy String
+  reportType  String
+  period      String
+  districtId  String?
+  dimension   String?
+  filters     Json?
+  status      String   @default("QUEUED")
+  fileUrl     String?
+  fileType    String?
+  error       String?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+}
