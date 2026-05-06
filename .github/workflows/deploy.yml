@@ -9,31 +9,77 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - name: Checkout code
+      # =========================
+      # CHECKOUT CODE
+      # =========================
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # =========================
+      # SETUP NODE
+      # =========================
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
+      # =========================
+      # FRONTEND ENV
+      # IMPORTANT:
+      # This fixes localhost issue
+      # =========================
+      - name: Create Frontend Production ENV
+        working-directory: ./frontend
+        run: |
+          echo "VITE_API_URL=https://mis.brightbeginings.org/api" > .env.production
+
+      # =========================
+      # BUILD FRONTEND
+      # =========================
       - name: Build Frontend
         working-directory: ./frontend
         run: |
-          npm ci
+          rm -rf dist
+          npm install
           npm run build
 
+      # =========================
+      # VERIFY FRONTEND BUILD
+      # =========================
+      - name: Verify Frontend Build
+        working-directory: ./frontend
+        run: |
+          if grep -R "localhost:4000" dist/; then
+            echo "ERROR: localhost detected in production build"
+            exit 1
+          else
+            echo "Frontend production build verified"
+          fi
+
+      # =========================
+      # PACKAGE FRONTEND
+      # =========================
       - name: Package Frontend
         working-directory: ./frontend
-        run: zip -r ../frontend.zip dist
+        run: |
+          zip -r ../frontend.zip dist
 
+      # =========================
+      # PACKAGE BACKEND
+      # =========================
       - name: Package Backend
         working-directory: ./backend
-        run: zip -r ../backend.zip . -x "node_modules/*"
+        run: |
+          zip -r ../backend.zip . \
+            -x "node_modules/*" \
+            -x ".git/*"
 
-      - name: Copy Zips to EC2
+      # =========================
+      # UPLOAD TO EC2
+      # =========================
+      - name: Upload Files to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -42,23 +88,44 @@ jobs:
           source: "frontend.zip,backend.zip"
           target: "/home/${{ secrets.EC2_USERNAME }}/"
 
-      - name: Execute Deployment on EC2
+      # =========================
+      # DEPLOY ON SERVER
+      # =========================
+      - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+
+            echo "Starting PRAGATI deployment..."
+
+            # =========================
+            # CREATE DIRECTORIES
+            # =========================
             mkdir -p /home/${{ secrets.EC2_USERNAME }}/pragati/backend
             mkdir -p /home/${{ secrets.EC2_USERNAME }}/pragati/frontend
+            sudo mkdir -p /var/www/pragati
 
+            # =========================
+            # CLEAN OLD PROJECT FILES
+            # =========================
+            rm -rf /home/${{ secrets.EC2_USERNAME }}/pragati/backend/*
+            rm -rf /home/${{ secrets.EC2_USERNAME }}/pragati/frontend/*
+
+            # =========================
+            # EXTRACT ZIP FILES
+            # =========================
             unzip -o /home/${{ secrets.EC2_USERNAME }}/backend.zip \
-            -d /home/${{ secrets.EC2_USERNAME }}/pragati/backend
+              -d /home/${{ secrets.EC2_USERNAME }}/pragati/backend
 
             unzip -o /home/${{ secrets.EC2_USERNAME }}/frontend.zip \
-            -d /home/${{ secrets.EC2_USERNAME }}/pragati/frontend
+              -d /home/${{ secrets.EC2_USERNAME }}/pragati/frontend
 
-            # Backend
+            # =========================
+            # BACKEND SETUP
+            # =========================
             cd /home/${{ secrets.EC2_USERNAME }}/pragati/backend
 
             npm install
@@ -66,25 +133,39 @@ jobs:
             npx prisma generate
             npx prisma db push --accept-data-loss
 
+            # Optional seed
+            npm run db:seed || true
+
+            # Restart backend
             pm2 restart pragati-backend || pm2 start "node src/app.js" --name pragati-backend
 
             pm2 save
 
-            # Frontend
+            # =========================
+            # VERIFY BACKEND
+            # =========================
+            sleep 5
+
+            curl http://127.0.0.1:4000/health
+
+            # =========================
+            # FRONTEND DEPLOY
+            # =========================
             sudo rm -rf /var/www/pragati/*
             sudo cp -r /home/${{ secrets.EC2_USERNAME }}/pragati/frontend/dist/* /var/www/pragati/
 
             sudo chown -R www-data:www-data /var/www/pragati
 
+            # =========================
+            # NGINX RELOAD
+            # =========================
             sudo nginx -t
             sudo systemctl reload nginx
 
+            # =========================
+            # CLEANUP
+            # =========================
             rm -f /home/${{ secrets.EC2_USERNAME }}/frontend.zip
             rm -f /home/${{ secrets.EC2_USERNAME }}/backend.zip
 
-            echo "Deployment Successful"
-
-
-
-
-     
+            echo "PRAGATI deployment completed successfully!"
