@@ -93,7 +93,11 @@ backend/dist/
 *.db
 
 # =========================
-# MAC/Linux hidden files
+# UPLOADS
 # =========================
-.*
-!.gitignore
+uploads/
+
+# =========================
+# TEST FILES
+# =========================
+.nyc_output/

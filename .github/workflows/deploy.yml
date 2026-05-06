@@ -1,0 +1,90 @@
+name: Deploy PRAGATI to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package Frontend
+        working-directory: ./frontend
+        run: zip -r ../frontend.zip dist
+
+      - name: Package Backend
+        working-directory: ./backend
+        run: zip -r ../backend.zip . -x "node_modules/*"
+
+      - name: Copy Zips to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "frontend.zip,backend.zip"
+          target: "/home/${{ secrets.EC2_USERNAME }}/"
+
+      - name: Execute Deployment on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            mkdir -p /home/${{ secrets.EC2_USERNAME }}/pragati/backend
+            mkdir -p /home/${{ secrets.EC2_USERNAME }}/pragati/frontend
+
+            unzip -o /home/${{ secrets.EC2_USERNAME }}/backend.zip \
+            -d /home/${{ secrets.EC2_USERNAME }}/pragati/backend
+
+            unzip -o /home/${{ secrets.EC2_USERNAME }}/frontend.zip \
+            -d /home/${{ secrets.EC2_USERNAME }}/pragati/frontend
+
+            # Backend
+            cd /home/${{ secrets.EC2_USERNAME }}/pragati/backend
+
+            npm install
+
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+
+            pm2 restart pragati-backend || pm2 start "node src/app.js" --name pragati-backend
+
+            pm2 save
+
+            # Frontend
+            sudo rm -rf /var/www/pragati/*
+            sudo cp -r /home/${{ secrets.EC2_USERNAME }}/pragati/frontend/dist/* /var/www/pragati/
+
+            sudo chown -R www-data:www-data /var/www/pragati
+
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+            rm -f /home/${{ secrets.EC2_USERNAME }}/frontend.zip
+            rm -f /home/${{ secrets.EC2_USERNAME }}/backend.zip
+
+            echo "Deployment Successful"
+
+
+
+
+     
