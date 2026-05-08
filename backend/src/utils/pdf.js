@@ -5,7 +5,17 @@ const generatePDF = async (data, meta) => {
 
   try {
     const puppeteer = require("puppeteer");
-    const browser = await puppeteer.launch({ headless: "new" });
+    const executablePath =
+      process.env.PUPPETEER_EXECUTABLE_PATH &&
+      String(process.env.PUPPETEER_EXECUTABLE_PATH).trim()
+        ? String(process.env.PUPPETEER_EXECUTABLE_PATH).trim()
+        : undefined;
+
+    const browser = await puppeteer.launch({
+      headless: "new",
+      executablePath,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     const buffer = await page.pdf({

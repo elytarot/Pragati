@@ -130,7 +130,40 @@ jobs:
             # =========================
             cd /home/${{ secrets.EC2_USERNAME }}/pragati/backend
 
+            # =========================
+            # FIX: PUPPETEER ENOSPC DURING NPM INSTALL
+            # =========================
+            echo "Checking disk space before install..."
+            df -h || true
+
+            echo "Cleaning caches to free space..."
+            rm -rf ~/.cache/puppeteer || true
+            rm -rf ~/.npm/_cacache || true
+            npm cache clean --force || true
+            sudo journalctl --vacuum-time=7d || true
+
+            # Prevent Puppeteer from downloading Chrome during install (saves disk)
+            export PUPPETEER_SKIP_DOWNLOAD=true
+
             npm install
+
+            # Install system Chromium for Puppeteer runtime (PDF reports)
+            echo "Installing system Chromium for Puppeteer..."
+            sudo apt-get update -y
+            sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+
+            # Configure Puppeteer to use system Chromium
+            if command -v chromium-browser >/dev/null 2>&1; then
+              export PUPPETEER_EXECUTABLE_PATH="$(command -v chromium-browser)"
+            elif command -v chromium >/dev/null 2>&1; then
+              export PUPPETEER_EXECUTABLE_PATH="$(command -v chromium)"
+            else
+              echo "ERROR: Chromium not found after install; aborting deploy (PDFs will fail)."
+              exit 1
+            fi
+
+            echo "Chromium binary: ${PUPPETEER_EXECUTABLE_PATH}"
+            "${PUPPETEER_EXECUTABLE_PATH}" --version || true
 
             npx prisma generate
             npx prisma db push --accept-data-loss
@@ -139,7 +172,7 @@ jobs:
             npm run db:seed || true
 
             # Restart backend
-            pm2 restart pragati-backend || pm2 start "node src/app.js" --name pragati-backend
+            pm2 restart pragati-backend --update-env || pm2 start "node src/app.js" --name pragati-backend --update-env
 
             pm2 save
 
