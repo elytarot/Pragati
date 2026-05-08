@@ -97,6 +97,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+          command_timeout: 30m
           script: |
 
             echo "Starting PRAGATI deployment..."
@@ -169,3 +171,5 @@ jobs:
             rm -f /home/${{ secrets.EC2_USERNAME }}/backend.zip
 
             echo "PRAGATI deployment completed successfully!"
+
+            
